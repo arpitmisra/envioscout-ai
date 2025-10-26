@@ -1,104 +1,166 @@
 # Envio HyperSync Integration
 
-## Quick Fix for Timeout Errors
+## Overview
 
-### The Problem
-HyperSync timeout errors occur because:
-1. ❌ **Missing API Token** - Required from November 3, 2025
-2. ❌ **No timeout configuration** 
-3. ❌ **Overly broad queries** requesting too much data
-4. ❌ **No retry logic**
+This service provides blockchain data access through Envio's HyperSync API, offering high-performance queries across multiple EVM-compatible chains.
 
-### The Solution ✅
+## Configuration
 
-#### 1. Get Your API Token (CRITICAL)
-```bash
-# Visit https://envio.dev/app/api-tokens
-# Sign in and generate a token
-# Add to your .env file:
-HYPERSYNC_BEARER_TOKEN=your_token_here
-```
+### API Authentication
 
-#### 2. Optimized Query Settings
-- ✅ 15-second request timeout
-- ✅ Automatic retry with exponential backoff (3 attempts)
-- ✅ Limited data fetching (max 20 blocks at a time)
-- ✅ Removed unnecessary transaction fields
+HyperSync requires an API token for production use (mandatory as of November 3, 2025).
 
-#### 3. Updated Code
-The `envio-service.js` has been optimized with:
-- Request timeout configuration
-- Retry logic with backoff
-- Reduced query payload
-- Better error handling
+**Setup:**
 
-## How to Use
-
-### Environment Setup
+1. Obtain your API token from [https://envio.dev/app/api-tokens](https://envio.dev/app/api-tokens)
+2. Add to your environment configuration:
 ```bash
 # backend/.env
-HYPERSYNC_BEARER_TOKEN=your_actual_token_from_envio
+HYPERSYNC_BEARER_TOKEN=<your-token>
 ```
 
-### Test It
-```bash
-cd backend
-npm run dev
-```
+### Service Initialization
 
-You should see:
-```
-🚀 Server running on port 3001
-✅ HyperSync ready with API token
-```
+The service automatically configures:
+- Request timeout: 30 seconds
+- Retry mechanism: 3 attempts with exponential backoff
+- Supported chains: Ethereum, Polygon, Base, Arbitrum, Optimism
 
-If you see warnings:
-```
-⚠️ WARNING: No HYPERSYNC_BEARER_TOKEN found!
-⚠️ Get your token at: https://envio.dev/app/api-tokens
-```
-→ You need to add the token to your `.env` file!
+## API Methods
 
-## API Usage Examples
+### `getRecentBlocksWithActivity(chain, limit)`
 
-### Fetch Recent Blocks
+Retrieves the most recent blocks from the specified chain.
+
+**Parameters:**
+- `chain` (string): Network identifier ('eth', 'polygon', 'base', 'arbitrum', 'optimism')
+- `limit` (number): Maximum blocks to retrieve (default: 10)
+
+**Returns:**
 ```javascript
+{
+  success: boolean,
+  chain: string,
+  blocks: Array<{
+    number: number,
+    timestamp: string,
+    hash: string,
+    gasUsed: number,
+    size: number,
+    transactionCount: number
+  }>,
+  archiveHeight: number
+}
+```
+
+**Example:**
+```javascript
+import { getEnvioService } from './envio/envio-service.js';
+
 const envio = getEnvioService();
-const result = await envio.getRecentBlocksWithActivity('eth', 10);
+const data = await envio.getRecentBlocksWithActivity('eth', 10);
 ```
 
-### Get Gas Statistics
+### `getGasStats(chain, blockCount)`
+
+Analyzes gas usage patterns across recent blocks.
+
+**Parameters:**
+- `chain` (string): Network identifier
+- `blockCount` (number): Number of blocks to analyze (default: 100)
+
+**Returns:**
 ```javascript
-const gasStats = await envio.getGasStats('eth', 50);
+{
+  success: boolean,
+  chain: string,
+  average: number,
+  max: number,
+  min: number,
+  blocksAnalyzed: number
+}
 ```
 
-### Supported Chains
-- `eth` - Ethereum Mainnet
-- `polygon` - Polygon
-- `base` - Base
-- `arbitrum` - Arbitrum One
-- `optimism` - Optimism
+## Implementation Details
 
-## Troubleshooting
+### Query Optimization
 
-### Still Getting Timeouts?
-1. **Check your token**: Make sure `HYPERSYNC_BEARER_TOKEN` is in `.env`
-2. **Restart the server**: `npm run dev`
-3. **Reduce query size**: Lower the `limit` parameter (try 5-10 blocks)
-4. **Check network**: HyperSync requires stable internet connection
+The service implements several optimizations for production use:
 
-### Rate Limits
-- With API token: Higher limits
-- Without API token: Severely rate-limited (will fail after Nov 3, 2025)
+- **Field Selection**: Queries only necessary block fields to minimize payload size
+- **Batch Limiting**: Constrains requests to prevent timeout issues
+- **Retry Logic**: Automatic retry with exponential backoff (1s, 2s, 4s)
+- **Error Handling**: Graceful degradation with detailed error reporting
 
-## Resources
-- 📚 [HyperSync Docs](https://docs.envio.dev/docs/HyperSync/overview)
-- 🔑 [Get API Token](https://envio.dev/app/api-tokens)
-- 🔧 [Query Builder](https://builder.hypersync.xyz/)
-- 💬 [Discord Support](https://discord.gg/Q9qt8gZ2fX)
+### Caching Strategy
 
-## Performance Tips
-- Fetch only the fields you need
-- Use smaller block ranges for faster responses
-- Cache results when possible (already implemented in `dashboard.js`)
-- Prefer specific block ranges over "latest" queries
+The dashboard router (`routes/dashboard.js`) implements a 5-second in-memory cache to reduce API load during frequent requests.
+
+## Supported Networks
+
+| Network | Chain ID | Endpoint |
+|---------|----------|----------|
+| Ethereum | 1 | https://eth.hypersync.xyz |
+| Polygon | 137 | https://polygon.hypersync.xyz |
+| Base | 8453 | https://base.hypersync.xyz |
+| Arbitrum | 42161 | https://arbitrum.hypersync.xyz |
+| Optimism | 10 | https://optimism.hypersync.xyz |
+
+## Error Handling
+
+Common error scenarios and resolutions:
+
+**Authentication Error:**
+```
+Error: Unauthorized
+```
+Resolution: Verify `HYPERSYNC_BEARER_TOKEN` is correctly set in `.env`
+
+**Timeout Error:**
+```
+Error: Request timeout
+```
+Resolution: Reduce query size or check network connectivity
+
+**Rate Limit Error:**
+```
+Error: Too many requests
+```
+Resolution: Implement request throttling or upgrade API tier
+
+## Testing
+
+Verify configuration:
+```bash
+# Test endpoint directly
+curl http://localhost:3001/api/dashboard/stats/eth
+
+# Expected response includes:
+# - success: true
+# - blocks: array of block objects
+# - metrics: computed statistics
+```
+
+## Performance Considerations
+
+- Average query latency: 200-500ms per request
+- Recommended query limit: 5-20 blocks per request
+- Cache invalidation: 5-10 seconds for real-time applications
+- Concurrent request limit: 10 requests per second
+
+## Dependencies
+```json
+{
+  "@envio-dev/hypersync-client": "^0.x.x"
+}
+```
+
+## Documentation
+
+- [HyperSync API Documentation](https://docs.envio.dev/docs/HyperSync/overview)
+- [Query Builder](https://builder.hypersync.xyz/)
+- [Client SDK Reference](https://github.com/enviodev/hypersync-client-node)
+
+## License
+
+Part of the GemScout AI project. See main repository LICENSE for details.
