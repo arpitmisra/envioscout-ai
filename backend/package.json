@@ -1,0 +1,30 @@
+{
+  "name": "envioscout-ai-backend",
+  "version": "1.0.0",
+  "type": "module",
+  "main": "server.js",
+  "description": "Backend for EnvioScout AI - Envio HyperSync + Gemini AI + Blockscout API",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "start": "node server.js",
+    "dev": "nodemon server.js",
+    "check-envio": "node envio/check-config.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "description": "",
+  "dependencies": {
+    "@envio-dev/hypersync-client": "^0.6.6",
+    "@google/generative-ai": "^0.24.1",
+    "@modelcontextprotocol/sdk": "^1.0.4",
+    "axios": "^1.12.2",
+    "cors": "^2.8.5",
+    "dotenv": "^17.2.3",
+    "eventsource": "^2.0.2",
+    "express": "^5.1.0"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.10"
+  }
+}
