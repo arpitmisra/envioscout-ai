@@ -123,6 +123,42 @@ class BlockscoutAPI {
      }
      return result;
    }
+   async getGasPrice(chain = 'eth') {
+     const endpoint = this.getEndpoint(chain);
+     console.log(`⛽ (API) Fetching gas prices for ${chain} from ${endpoint}/stats`);
+     
+     try {
+       const response = await this.client.get(`${endpoint}/stats`);
+       
+       if (response.data) {
+         const data = response.data;
+         const gasPriceGwei = data.gas_price ? Number(data.gas_price) / 1e9 : null;
+         const gasPriceAvg = data.gas_prices?.average ? Number(data.gas_prices.average) : gasPriceGwei;
+         const gasPriceSlow = data.gas_prices?.slow ? Number(data.gas_prices.slow) : gasPriceGwei;
+         const gasPriceFast = data.gas_prices?.fast ? Number(data.gas_prices.fast) : gasPriceGwei;
+         
+         const gasPrices = {
+           slow: gasPriceSlow || gasPriceAvg || 0,
+           average: gasPriceAvg || 0,
+           fast: gasPriceFast || gasPriceAvg || 0
+         };
+         
+         console.log(`✅ Gas prices for ${chain}:`, gasPrices);
+         return { 
+           success: true, 
+           chain,
+           gasPrices,
+           rawData: data
+         };
+       }
+       
+       console.warn(`⚠️ No gas price data for ${chain}`);
+       return { success: false, error: 'No gas price data', chain };
+     } catch (error) {
+       console.error(`❌ Gas price error for ${chain}:`, error.message);
+       return { success: false, error: error.message, chain };
+     }
+   }
 }
 let blockscoutAPI = null;
 export function getBlockscoutAPI() {
