@@ -175,10 +175,12 @@ class GeminiAgent {
           }
           const blocks = blocksResult.blocks;
           const latestBlock = blocks[0];
-          const avgGasFee = latestBlock.avgGasFee || 0;
+          const avgGasPriceWei = latestBlock.avgGasPrice || 0;
+          const avgGasPriceGwei = avgGasPriceWei / 1e9;
+          const avgGasFeeEth = (latestBlock.gasFee || 0);
           const nativeSymbols = { eth: 'ETH', polygon: 'POL', base: 'ETH', optimism: 'ETH', arbitrum: 'ETH' };
           const symbol = nativeSymbols[chainForGas] || chainForGas.toUpperCase();
-          const prompt = this.buildGasFeesPrompt(userMessage, chainForGas, avgGasFee, symbol, latestBlock);
+          const prompt = this.buildGasFeesPrompt(userMessage, chainForGas, avgGasPriceGwei, avgGasFeeEth, symbol, latestBlock);
           const response = await this.generateWithRetry(prompt);
           console.log(`✅ Gas fee analysis complete.`);
           return {
@@ -198,7 +200,26 @@ class GeminiAgent {
       const addressMatch = userMessage.match(/0x[a-fA-F0-9]{40}/);
       if (!addressMatch) {
         console.log('💬 General question (no address, no special intent)');
-        const response = await this.generateWithRetry(userMessage);
+        const systemPrompt = `You are EnvioScout AI, a blockchain analytics assistant with REAL-TIME access to blockchain data.
+
+**YOUR CAPABILITIES:**
+- I have DIRECT access to Envio HyperSync for real-time blockchain data
+- I can fetch current gas fees, recent blocks, and network statistics  
+- I support Ethereum, Polygon, Optimism, Base, and Arbitrum networks
+- I use Blockscout API for address and transaction analysis
+
+**IMPORTANT INSTRUCTIONS:**
+- NEVER say "I can't access real-time data" - I CAN and DO have real-time access
+- NEVER suggest external websites or tools - I have the data built-in
+- For gas fees, I will fetch current data from Envio HyperSync
+- For blockchain queries, I use live APIs, not historical estimates
+- Always provide helpful, accurate information based on my actual capabilities
+
+**User Question:** ${userMessage}
+
+Provide a helpful response. If the question is about gas fees, recent blocks, or blockchain data, acknowledge that you have access and offer to help.`;
+        
+        const response = await this.generateWithRetry(systemPrompt);
         return {
           response,
           toolsUsed: [],
@@ -311,7 +332,7 @@ class GeminiAgent {
       throw error;
     }
   }
-  buildGasFeesPrompt(userMessage, chain, avgGasFee, symbol, latestBlock) {
+  buildGasFeesPrompt(userMessage, chain, avgGasPriceGwei, avgGasFeeEth, symbol, latestBlock) {
     let prompt = `You are a blockchain data assistant helping users understand current gas fees.\n\n`;
     prompt += `User Question: "${userMessage}"\n\n`;
     prompt += `## Current Gas Fee Information for ${chain.toUpperCase()} Network\n\n`;
@@ -319,29 +340,26 @@ class GeminiAgent {
     prompt += `- Block Number: ${latestBlock.number || 'N/A'}\n`;
     prompt += `- Timestamp: ${latestBlock.timestamp ? new Date(latestBlock.timestamp).toLocaleString() : 'N/A'}\n`;
     prompt += `- Transactions: ${latestBlock.transactionCount || 0}\n`;
-    prompt += `- Average Gas Fee: ${avgGasFee.toFixed(8)} ${symbol}\n`;
-    if (avgGasFee > 0) {
-      prompt += `- Gas Fee in Gwei: ${(avgGasFee * 1e9).toFixed(2)} Gwei\n`;
-    }
+    prompt += `- Average Gas Price: ${avgGasPriceGwei.toFixed(4)} Gwei\n`;
+    prompt += `- Total Gas Fee (for this block): ${avgGasFeeEth.toFixed(8)} ${symbol}\n`;
     prompt += `\n---\n\n`;
     prompt += `## STRICT RESPONSE INSTRUCTIONS:\n\n`;
     prompt += `**REQUIRED:**\n`;
-    prompt += `1. State the current average gas fee clearly: "${avgGasFee.toFixed(8)} ${symbol}"\n`;
-    prompt += `2. Convert to Gwei if applicable (for ETH-based chains): "${(avgGasFee * 1e9).toFixed(2)} Gwei"\n`;
-    prompt += `3. Provide context about whether this is high, medium, or low (based on typical ranges)\n`;
-    prompt += `4. Mention this is based on recent block data from ${chain.toUpperCase()}\n`;
-    prompt += `5. Credit Envio HyperSync for providing this real-time data\n\n`;
+    prompt += `1. State the current average gas price clearly: "${avgGasPriceGwei.toFixed(4)} Gwei"\n`;
+    prompt += `2. Provide context about whether this is high, medium, or low (based on typical ranges)\n`;
+    prompt += `3. Mention this is based on recent block data from ${chain.toUpperCase()}\n`;
+    prompt += `4. Credit Envio HyperSync for providing this real-time data\n\n`;
     prompt += `**CONTEXT FOR GAS FEES:**\n`;
-    prompt += `- For Ethereum: <20 Gwei = Low, 20-50 Gwei = Medium, >50 Gwei = High\n`;
-    prompt += `- For Polygon: <50 Gwei = Low, 50-200 Gwei = Medium, >200 Gwei = High\n`;
-    prompt += `- For Base/Optimism/Arbitrum: <0.001 Gwei = Low, 0.001-0.01 Gwei = Medium, >0.01 Gwei = High\n\n`;
+    prompt += `- For Ethereum: <1 Gwei = Very Low, 1-10 Gwei = Low, 10-50 Gwei = Medium, >50 Gwei = High\n`;
+    prompt += `- For Polygon: <30 Gwei = Low, 30-100 Gwei = Medium, 100-200 Gwei = High, >200 Gwei = Very High\n`;
+    prompt += `- For Base/Optimism/Arbitrum: <0.01 Gwei = Low, 0.01-0.1 Gwei = Medium, >0.1 Gwei = High\n\n`;
     prompt += `**ABSOLUTELY FORBIDDEN:**\n`;
     prompt += `- DO NOT generate code examples\n`;
     prompt += `- DO NOT suggest using web3 tools or development libraries\n`;
     prompt += `- DO NOT apologize for data being outdated - this is real-time data\n`;
     prompt += `- DO NOT provide historical gas fee trends (we only have current data)\n\n`;
     prompt += `**Response Format:**\n`;
-    prompt += `Write in natural, conversational language. Be concise (2-4 sentences). Focus on the current gas fee and what it means for users.\n`;
+    prompt += `Write in natural, conversational language. Be concise (2-4 sentences). Focus on the current gas price and what it means for users.\n`;
     return prompt;
   }
   buildBlocksPrompt(userMessage, chain, blocksData) {
