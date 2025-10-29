@@ -1,5 +1,6 @@
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import { getBlockscoutAPI } from '../blockscout/blockscout-api.js';
+import { getEnvioService } from '../envio/envio-service.js';
 class GeminiAgent {
   constructor(apiKey) {
     if (!apiKey) {
@@ -41,6 +42,9 @@ class GeminiAgent {
         (msg.includes('on base') || msg.includes('on polygon') || msg.includes('on eth') || 
          msg.includes('on optimism') || msg.includes('on arbitrum'))) {
       return 'contract_analysis';
+    }
+    if (msg.includes('gas') && (msg.includes('fee') || msg.includes('price') || msg.includes('cost'))) {
+      return 'gas_fees';
     }
     if (msg.includes('block') || msg.includes('recent blocks') || msg.match(/recent \d+ blocks/)) {
       return 'blocks';
@@ -155,6 +159,41 @@ class GeminiAgent {
           toolsUsed: ['getBlocks'], 
           timestamp: new Date().toISOString() 
         };
+      }
+      if (intent === 'gas_fees') {
+        const chainForGas = requestedChain || 'eth';
+        console.log(`⛽ Fetching gas fee data for ${chainForGas}...`);
+        try {
+          const envioService = getEnvioService();
+          const blocksResult = await envioService.getRecentBlocksWithActivity(chainForGas, 5);
+          if (!blocksResult.success || !blocksResult.blocks || blocksResult.blocks.length === 0) {
+            return {
+              response: `Sorry, I couldn't fetch current gas fee data for ${chainForGas.toUpperCase()}. ${blocksResult.error || 'The network might be temporarily unavailable.'}`,
+              toolsUsed: ['getGasFees'],
+              timestamp: new Date().toISOString()
+            };
+          }
+          const blocks = blocksResult.blocks;
+          const latestBlock = blocks[0];
+          const avgGasFee = latestBlock.avgGasFee || 0;
+          const nativeSymbols = { eth: 'ETH', polygon: 'POL', base: 'ETH', optimism: 'ETH', arbitrum: 'ETH' };
+          const symbol = nativeSymbols[chainForGas] || chainForGas.toUpperCase();
+          const prompt = this.buildGasFeesPrompt(userMessage, chainForGas, avgGasFee, symbol, latestBlock);
+          const response = await this.generateWithRetry(prompt);
+          console.log(`✅ Gas fee analysis complete.`);
+          return {
+            response,
+            toolsUsed: ['getGasFees'],
+            timestamp: new Date().toISOString()
+          };
+        } catch (error) {
+          console.error(`❌ Failed to fetch gas fees: ${error.message}`);
+          return {
+            response: `Sorry, I encountered an error fetching gas fee data for ${chainForGas.toUpperCase()}: ${error.message}`,
+            toolsUsed: ['getGasFees'],
+            timestamp: new Date().toISOString()
+          };
+        }
       }
       const addressMatch = userMessage.match(/0x[a-fA-F0-9]{40}/);
       if (!addressMatch) {
@@ -271,6 +310,39 @@ class GeminiAgent {
       console.error('❌ Error in Gemini Agent:', error);
       throw error;
     }
+  }
+  buildGasFeesPrompt(userMessage, chain, avgGasFee, symbol, latestBlock) {
+    let prompt = `You are a blockchain data assistant helping users understand current gas fees.\n\n`;
+    prompt += `User Question: "${userMessage}"\n\n`;
+    prompt += `## Current Gas Fee Information for ${chain.toUpperCase()} Network\n\n`;
+    prompt += `**Latest Block Data:**\n`;
+    prompt += `- Block Number: ${latestBlock.number || 'N/A'}\n`;
+    prompt += `- Timestamp: ${latestBlock.timestamp ? new Date(latestBlock.timestamp).toLocaleString() : 'N/A'}\n`;
+    prompt += `- Transactions: ${latestBlock.transactionCount || 0}\n`;
+    prompt += `- Average Gas Fee: ${avgGasFee.toFixed(8)} ${symbol}\n`;
+    if (avgGasFee > 0) {
+      prompt += `- Gas Fee in Gwei: ${(avgGasFee * 1e9).toFixed(2)} Gwei\n`;
+    }
+    prompt += `\n---\n\n`;
+    prompt += `## STRICT RESPONSE INSTRUCTIONS:\n\n`;
+    prompt += `**REQUIRED:**\n`;
+    prompt += `1. State the current average gas fee clearly: "${avgGasFee.toFixed(8)} ${symbol}"\n`;
+    prompt += `2. Convert to Gwei if applicable (for ETH-based chains): "${(avgGasFee * 1e9).toFixed(2)} Gwei"\n`;
+    prompt += `3. Provide context about whether this is high, medium, or low (based on typical ranges)\n`;
+    prompt += `4. Mention this is based on recent block data from ${chain.toUpperCase()}\n`;
+    prompt += `5. Credit Envio HyperSync for providing this real-time data\n\n`;
+    prompt += `**CONTEXT FOR GAS FEES:**\n`;
+    prompt += `- For Ethereum: <20 Gwei = Low, 20-50 Gwei = Medium, >50 Gwei = High\n`;
+    prompt += `- For Polygon: <50 Gwei = Low, 50-200 Gwei = Medium, >200 Gwei = High\n`;
+    prompt += `- For Base/Optimism/Arbitrum: <0.001 Gwei = Low, 0.001-0.01 Gwei = Medium, >0.01 Gwei = High\n\n`;
+    prompt += `**ABSOLUTELY FORBIDDEN:**\n`;
+    prompt += `- DO NOT generate code examples\n`;
+    prompt += `- DO NOT suggest using web3 tools or development libraries\n`;
+    prompt += `- DO NOT apologize for data being outdated - this is real-time data\n`;
+    prompt += `- DO NOT provide historical gas fee trends (we only have current data)\n\n`;
+    prompt += `**Response Format:**\n`;
+    prompt += `Write in natural, conversational language. Be concise (2-4 sentences). Focus on the current gas fee and what it means for users.\n`;
+    return prompt;
   }
   buildBlocksPrompt(userMessage, chain, blocksData) {
     let prompt = `You are a blockchain data assistant helping users understand blockchain block information.\n\n`;
